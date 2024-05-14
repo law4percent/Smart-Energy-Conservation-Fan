@@ -38,7 +38,7 @@ float temp;
 bool pirStatus;
 int countMotion = 0;
 int Index = 0;
-bool Spd1_status = true;
+bool Spd1_status = false;
 bool Spd2_status = false;
 bool Spd3_status = false;
 bool RT_status = true;
