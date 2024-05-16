@@ -1,22 +1,20 @@
 /*
   Humidity
-  less than 20%  ==> speed1
   less than 30%  ==> speed1
   30% - 50%      ==> speed2
   more that 50%  ==> speed3
 
   Temperature
-  less than 15°C ==> speed1
-  less than 20°C ==> speed1
-  20°C - 24°C    ==> speed2
-  more than 24°C ==> speed3
+  less than 25°C ==> speed1
+  more than 24°C and less than 31°C ==> speed2
+  more than 30°C ==> speed3
 */
 
 #include "DHT.h"
 #include "BluetoothSerial.h"
 BluetoothSerial BT;
 
-// #define Serial_Debug
+#define Serial_Debug
 
 // Pin Used
 const byte DHTPIN = 26;
@@ -27,8 +25,6 @@ const byte Speed3 = 14;
 const byte Rotate = 27;
 const byte LEDindecatorMode = 18;
 const byte ReadyLEDIndicator = 19;
-// const byte LEDindecatorDHT11 = 23;
-// const byte LEDindecatorPIR = 21;
 
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
@@ -41,7 +37,7 @@ int Index = 0;
 bool Spd1_status = false;
 bool Spd2_status = false;
 bool Spd3_status = false;
-bool RT_status = true;
+bool RT_status = false;
 bool manualMode = false;
 bool Awake = true;
 bool pirMode = true;
@@ -52,14 +48,11 @@ bool ShutdownFan = false;
 unsigned long previousMillis1 = 0;
 const long interval1 = 60000;  // 1 Min
 unsigned long previousMillis = 0;
-const long TimeInterval = 60000;
+const long TimeInterval = 30000;
 
 void setup() {
   Serial.begin(115200);
   dht.begin();
-  delay(5000);
-
-  lastRotateData = RT_status;
 
   pinMode(PIR, INPUT);
   pinMode(Speed1, OUTPUT);
@@ -68,42 +61,36 @@ void setup() {
   pinMode(Rotate, OUTPUT);
   pinMode(LEDindecatorMode, OUTPUT);
   pinMode(ReadyLEDIndicator, OUTPUT);
-  // pinMode(LEDindecatorDHT11, OUTPUT);
-  // pinMode(LEDindecatorPIR, OUTPUT);
 
   digitalWrite(LEDindecatorMode, manualMode);
   digitalWrite(ReadyLEDIndicator, 0);
-  // digitalWrite(LEDindecatorPIR, pirMode);
-  // digitalWrite(LEDindecatorDHT11, dhtStatus);
+  BT.begin("Smart Energy Fan");
+  UpdateFan();
+  delay(500);
+  Serial.println(F("ready!"));
+  delay(2000);
 
-  Serial.print(F("Preparing"));
-  for (int cnt = 0; cnt < 10; cnt++) {
-    Serial.print('.');
+  while (true) {
+    Serial.println("No motion found!");
+    if (digitalRead(PIR)) break;
     delay(500);
   }
-  Serial.println(F("ready!"));
-  delay(500);
+  Serial.println("Motion found!");
 
-  BT.begin("Smart Energy Fan");
-  digitalWrite(ReadyLEDIndicator, 1);
-  delay(500);
+  RT_status = true;
+  AdjustSpeedFan(3);
+  UpdateFan();
 
-  digitalWrite(Speed1, Spd1_status);
-  digitalWrite(Speed2, Spd2_status);
-  digitalWrite(Speed3, Spd3_status);
-  digitalWrite(Rotate, RT_status);
+  lastRotateData = RT_status;
 }
 
 void loop() {
-
-  delay(2000);
-
   countMotion = 0;
   unsigned long currentMillis = millis();
   hum = dht.readHumidity();
   temp = dht.readTemperature();
   pirStatus = digitalRead(PIR);
-
+  delay(2000);
 
   String BTdata = "";
   bool rData = false;
@@ -353,7 +340,6 @@ void AdjustSpeedFan(const byte speed) {
 }
 
 void CheckTempHumStatus() {
-  
   const int vtemp = int(temp);
   const int vhum = int(hum);
   byte speed;
@@ -369,10 +355,15 @@ void CheckTempHumStatus() {
     speed = 2;
   }
 
-  if (vtemp < 20) {
+  // Temperature
+  // less than 25°C ==> speed1
+  // more than 24°C and less than 31°C ==> speed2
+  // more than 30°C ==> speed3
+
+  if (vtemp < 25) {
     RT_status = lastRotateData;
     speed = 1;
-  } else if (vtemp > 24) {
+  } else if (vtemp > 30) {
     RT_status = lastRotateData;
     speed = 3;
   } else {
@@ -400,5 +391,4 @@ void UpdateFan() {
   digitalWrite(Speed3, Spd3_status);
   digitalWrite(Rotate, RT_status);
   digitalWrite(LEDindecatorMode, manualMode);
-  // digitalWrite(LEDindecatorPIR, pirMode);
 }
