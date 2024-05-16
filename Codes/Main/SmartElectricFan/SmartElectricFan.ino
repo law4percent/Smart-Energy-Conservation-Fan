@@ -46,9 +46,16 @@ bool lastRotateData;
 bool ShutdownFan = false;
 
 unsigned long previousMillis1 = 0;
-const long interval1 = 60000;  // 1 Min
+const long interval_1min = 60000;  // 1 Min
 unsigned long previousMillis = 0;
 const long TimeInterval = 30000;
+
+byte last_speed;
+const int delay1sec = 2000;
+
+bool startSleep = true;
+unsigned long StartToCount_Sleep;
+unsigned long EndSleep;
 
 void setup() {
   Serial.begin(115200);
@@ -65,15 +72,22 @@ void setup() {
   digitalWrite(LEDindecatorMode, manualMode);
   digitalWrite(ReadyLEDIndicator, 0);
   BT.begin("Smart Energy Fan");
+
   UpdateFan();
   delay(500);
+  
   Serial.println(F("ready!"));
-  delay(2000);
 
   while (true) {
     Serial.println("No motion found!");
     if (digitalRead(PIR)) break;
-    delay(500);
+
+    if (BT.available() > 0) {
+      char readBTdata = BT.read();
+      UpdateFromBT(readBTdata);
+      break;
+    } 
+    delay(50);
   }
   Serial.println("Motion found!");
 
@@ -82,6 +96,7 @@ void setup() {
   UpdateFan();
 
   lastRotateData = RT_status;
+  StartToCount_Sleep = millis();
 }
 
 void loop() {
@@ -92,91 +107,42 @@ void loop() {
   pirStatus = digitalRead(PIR);
   delay(2000);
 
-  String BTdata = "";
-  bool rData = false;
-
-  while (BT.available() > 0) {
+  if (BT.available() > 0) {
     char readBTdata = BT.read();
-    if (readBTdata != '\n' or readBTdata != '\r')
-      BTdata += readBTdata;
-    else
-      break;
-    rData = true;
-  }
-
-  if (rData) {
-    BTdata.trim();
-  }
-
-  if (BTdata.length() >= 2) {
-    Serial.println(BTdata);
+    Serial.println(readBTdata);
     bool spd = false;
+
     if (manualMode) {
-      if (BTdata.equals("s1")) {
-        AdjustSpeedFan(1);
-        spd = true;
-      } else if (BTdata.equals("s2")) {
-        AdjustSpeedFan(2);
-        spd = true;
-      } else if (BTdata.equals("s3")) {
-        AdjustSpeedFan(3);
-        spd = true;
-      } else if (BTdata.equals("s0")) {
-        AdjustSpeedFan(0);
-        RT_status = false;
-        spd = true;
+      switch (readBTdata) {
+        case '1':
+          AdjustSpeedFan(1);
+          spd = true;
+          break;
+
+        case '2':
+          AdjustSpeedFan(2);
+          spd = true;
+          break;
+
+        case '3':
+          AdjustSpeedFan(3);
+          spd = true;
+          break;
+
+        case '0':
+          AdjustSpeedFan(0);
+          RT_status = false;
+          spd = true;
+          break;
       }
     }
 
     if (spd) {
-      Serial.println("=== Speed Adjusted ===");
-      Serial.println();
+      Serial.println("=== Speed Adjusted ===\n");
     }
 
-    if (BTdata.equals("r1")) {
-      RT_status = true;
-    } else if (BTdata.equals("r0")) {
-      RT_status = false;
-    } else if (BTdata.equals("m1")) {
-      manualMode = true;
-    } else if (BTdata.equals("m0")) {
-      manualMode = false;
-    } else if (BTdata.equals("p1")) {
-      pirMode = true;
-    } else if (BTdata.equals("p0")) {
-      pirMode = false;
-      Awake = true;
-    } else if (BTdata.equals("sht1")) {
-      ShutdownFan = true;
-      AdjustSpeedFan(0);
-    } else if (BTdata.equals("sht0")) {
-      ShutdownFan = false;
-    } else if (BTdata.equals("st")) {
-      TempHum_BTupdate();
-      delay(3000);
-      SendFanStatus();
-    }
+    UpdateFromBT(readBTdata);
     UpdateFan();
-  }
-
-  // It will update the speed in every one minute if both manual mode and sleep are false
-  if (currentMillis - previousMillis1 >= interval1) {
-    if (!manualMode and Awake and !ShutdownFan) {
-      CheckTempHumStatus();
-      UpdateFan();
-    }
-    
-    if (!ShutdownFan and pirMode) {
-      Awake = false;
-    } else {
-      Awake = true;
-    }
-
-    if (!ShutdownFan) {
-      TempHum_BTupdate();
-      delay(1000);
-    }
-    previousMillis1 = currentMillis;
   }
 
   // Count every motion detected
@@ -184,36 +150,107 @@ void loop() {
     countMotion++;
   }
 
-  // Check updates kun naa pabay naglihok 1 min
-  if (currentMillis - previousMillis >= TimeInterval) {
-    if (countMotion == 0 and pirMode and !ShutdownFan) {
-      lastRotateData = RT_status;
-      Awake = false;
-      AdjustSpeedFan(0);
-      UpdateFan();
-      BT.println('l');
-      delay(3000);
+  // Sleep after 30 secs when no motion was found
+  if (startSleep) {
+    if (currentMillis - StartToCount_Sleep >= TimeInterval) {
+      StartToCount_Sleep = 0;
+      startSleep = false;
+      previousMillis = currentMillis;
+
+      if (countMotion < 1 and pirMode) {
+        AdjustRotate(false);
+        SleepMode(false);
+        AdjustSpeedFan(0);
+        UpdateFan();
+      }
     }
-    previousMillis = currentMillis;
+  } else {
+    if (currentMillis - previousMillis >= TimeInterval) {
+      if (countMotion < 1 and pirMode) {
+        AdjustRotate(false);
+        SleepMode(false);
+        AdjustSpeedFan(0);
+        UpdateFan();
+      }
+
+      previousMillis = currentMillis;
+    }
+  }
+
+  // It will update the speed in every one minute if both manual mode and sleep are false
+  if (currentMillis - previousMillis1 >= interval_1min) {
+    if (!manualMode and Awake) {
+      CheckTempHumStatus();
+      UpdateFan();
+    }
+    TempHum_BTupdate();
+    
+    previousMillis1 = currentMillis;
   }
 
   // Once the fan is asleep, the only task will be seeking motions
-  if (countMotion > 0 and !ShutdownFan and !Awake) {
-    Serial.println("Wake up!");
+  if (countMotion > 0 and !Awake) {
     if (!manualMode)
       CheckTempHumStatus();
-    RT_status = lastRotateData;
-    Awake = true;
+    
+    AdjustRotate(lastRotateData);
+    SleepMode(false);
     UpdateFan();
     countMotion = 0;
   }
+
 #ifdef Serial_Debug
   printAllComponentStatus();
 #endif
 }
 
+void UpdateFromBT(char readBTdata) {
+  switch (readBTdata) {
+    case 'q':
+      RT_status = true;
+      break;
+
+    case 'w':
+      RT_status = false;
+      break;
+
+    case 'e':
+      manualMode = false; 
+      break;
+
+    case 'r':
+      manualMode = true;
+      break;
+
+    case 't':
+        pirMode = true;
+      break;
+
+    case 'y':
+      pirMode = false;
+      Awake = true;
+      break;
+
+    case 'u':
+      ShutdownFan = true;
+      AdjustSpeedFan(0);
+      break;
+
+    case 'i':
+      ShutdownFan = false;
+      break;
+  
+    case 'o':
+      TempHum_BTupdate();
+      delay(3000);
+      SendFanStatus();
+      break;
+  }
+}
+
 void SendFanStatus() {
   Serial.print(F("Sending..."));
+  const int delay2sec = 2000;
   if (Spd1_status) {
     BT.println('a');
   } else if (Spd2_status) {
@@ -223,50 +260,50 @@ void SendFanStatus() {
   } else {
     BT.println('d');
   }
-  delay(3000);
+  delay(delay2sec);
 
   if (RT_status) {
     BT.println('e');
   } else {
     BT.println('f');
   }
-  delay(3000);
+  delay(delay2sec);
 
   if (manualMode) {
     BT.println('g');
   } else {
     BT.println('h');
   }
-  delay(3000);
+  delay(delay2sec);
 
   if (pirMode) {
     BT.println('i');
   } else {
     BT.println('j');
   }
-  delay(3000);
+  delay(delay2sec);
 
   if (Awake) {
     BT.println('k');
   } else {
     BT.println('l');
   }
-  delay(3000);
+  delay(delay2sec);
 
   if (!dhtStatus) {
     BT.println('m');
   }
-  delay(3000);
+  delay(delay2sec);
 
   if (ShutdownFan) {
     BT.println('n');
   } else {
     BT.println('o');
   }
-  delay(3000);
+  delay(delay2sec);
 
   BT.println('A');
-  delay(2000);
+  delay(delay2sec);
   Serial.println(F("done!"));
 }
 
@@ -297,46 +334,67 @@ void printAllComponentStatus() {
 
 void TempHum_BTupdate() {
   if (isnan(hum) || isnan(temp)) {
-    dhtStatus = false;
-    // digitalWrite(LEDindecatorDHT11, dhtStatus);
     Serial.println(F("DHT failed, need to fix!"));
     BT.println("m");
   } else {
     String sendHumTemp = "";
     dhtStatus = true;
-    // digitalWrite(LEDindecatorDHT11, dhtStatus);
     sendHumTemp += String(int(hum));
     sendHumTemp += "-";
     sendHumTemp += String(int(temp));
     BT.println(sendHumTemp);
     Serial.println(sendHumTemp);
   }
+  delay(delay1sec);
+}
+
+void AdjustRotate(bool rotate) {
+  lastRotateData = rotate;
+  if (rotate) {
+    RT_status = true;
+  } else {
+    RT_status = false;
+  }
+  delay(delay1sec);
 }
 
 void AdjustSpeedFan(const byte speed) {
+  last_speed = speed;
   switch (speed) {
     case 0:
       Spd1_status = 0;
       Spd2_status = 0;
       Spd3_status = 0;
       RT_status = false;
+
+      BT.println('d');
       break;
+
     case 1:
       Spd1_status = 1;
       Spd2_status = 0;
       Spd3_status = 0;
+
+      BT.println('a');
       break;
+
     case 2:
       Spd1_status = 0;
       Spd2_status = 1;
       Spd3_status = 0;
+      
+      BT.println('b');
       break;
+
     case 3:
       Spd1_status = 0;
       Spd2_status = 0;
       Spd3_status = 1;
+      
+      BT.println('c');
       break;
   }
+  delay(delay1sec);
 }
 
 void CheckTempHumStatus() {
@@ -355,11 +413,6 @@ void CheckTempHumStatus() {
     speed = 2;
   }
 
-  // Temperature
-  // less than 25°C ==> speed1
-  // more than 24°C and less than 31°C ==> speed2
-  // more than 30°C ==> speed3
-
   if (vtemp < 25) {
     RT_status = lastRotateData;
     speed = 1;
@@ -372,17 +425,6 @@ void CheckTempHumStatus() {
   }
 
   AdjustSpeedFan(speed);
-  switch (speed) {
-    case 1:
-      BT.println("a");
-      break;
-    case 2:
-      BT.println("b");
-      break;
-    case 3:
-      BT.println("c");
-      break;
-  }
 }
 
 void UpdateFan() {
@@ -391,4 +433,15 @@ void UpdateFan() {
   digitalWrite(Speed3, Spd3_status);
   digitalWrite(Rotate, RT_status);
   digitalWrite(LEDindecatorMode, manualMode);
+}
+
+void SleepMode(bool sleep) {
+  if (sleep) {
+    Awake = true;
+    BT.println("k");
+  } else {
+    Awake = false;
+    BT.println("l");
+  }
+  delay(delay1sec);
 }
