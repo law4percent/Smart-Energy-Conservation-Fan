@@ -5,9 +5,9 @@
   more that 50%  ==> speed3
 
   Temperature
-  less than 25°C ==> speed1
-  more than 24°C and less than 31°C ==> speed2
-  more than 30°C ==> speed3
+  less than 21°C ==> speed0
+  more than 20°C and less than 25°C ==> speed1
+  more than 25°C and less than 30°C ==> speed3
 */
 
 #include <DHT.h>
@@ -406,15 +406,20 @@ void CheckTempHumStatus() {
   //   speed = 2;
   // }
 
-  if (vtemp < 25) {
+// Temperature
+//   less than 21°C ==> speed0
+//   more than 20°C and less than 25°C ==> speed1
+//   more than 25°C and less than 30°C ==> speed3
+  
+  if (vtemp < 21) {
     RT_status = lastRotateData;
-    speed = 1;
-  } else if (vtemp > 30) {
+    speed = 0;
+  } else if (vtemp > 25) {
     RT_status = lastRotateData;
     speed = 3;
   } else {
     RT_status = lastRotateData;
-    speed = 2;
+    speed = 1;
   }
 
   AdjustSpeedFan(speed);
